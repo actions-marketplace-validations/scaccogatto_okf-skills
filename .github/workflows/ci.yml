@@ -19,10 +19,38 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Validate plugin & marketplace manifests
-        run: jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json
+        run: jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json .mcp.json
 
       - name: Unit tests — okf_validate internals
         run: uv run tests/test_okf_validate.py
+
+      - name: Unit tests for the okf_mcp server tools
+        run: uv run tests/test_okf_mcp.py
+
+      - name: End-to-end spawn of the MCP server from .mcp.json over stdio
+        run: uv run tests/test_okf_mcp_e2e.py
+      - name: Unit tests — okf_backfill_events extraction
+        run: uv run tests/test_okf_backfill_events.py
+
+      # The trust benchmark ships no runnable product, but its grader and its
+      # analysis decide whether a published result is honest, so they are held to
+      # the same gate as the skills. No API call is made: the runner is exercised
+      # through its assembly and preflight paths only.
+      - name: Unit tests for the trust benchmark grader and analysis
+        run: uv run benchmark/trust/tests/test_grade_analyze.py
+
+      - name: Unit tests for the trust benchmark trial assembly and preflight
+        run: uv run benchmark/trust/tests/test_run.py
+
+      - name: Unit tests for the trust benchmark item selection and power
+        run: uv run benchmark/trust/tests/test_power.py
+
+      # Same gate as the trust benchmark, and for the same reason: this one's
+      # analysis decides whether a published comparison is honest. Its direction
+      # tests exist because the trust benchmark's analysis had its effect sign
+      # inverted and nothing exercised it until a real result arrived.
+      - name: Unit tests for the gate benchmark harness and analysis
+        run: uv run benchmark/gate/tests/test_gate.py
 
       - name: Validate example bundle (strict)
         run: uv run skills/validate/scripts/okf_validate.py examples/sample-bundle --strict
@@ -278,6 +306,11 @@ jobs:
       - name: Unit tests — okf_validate internals
         run: uv run tests/test_okf_validate.py
 
+      - name: Unit tests for the okf_mcp server tools
+        run: uv run tests/test_okf_mcp.py
+      - name: Unit tests — okf_backfill_events extraction
+        run: uv run tests/test_okf_backfill_events.py
+
       - name: Validate example bundle (strict, native cp1252 console)
         run: uv run skills/validate/scripts/okf_validate.py examples/sample-bundle --strict
 
@@ -312,7 +345,7 @@ jobs:
             exit 0
           fi
           # paths whose contents ship to users and therefore need a release
-          shipped='^(\.claude-plugin/|skills/|hooks/|templates/|action\.yml)'
+          shipped='^(\.claude-plugin/|skills/|hooks/|servers/|templates/|action\.yml|\.mcp\.json)'
           changed="$(git diff --name-only "$BASE" "$HEAD")"
           if ! echo "$changed" | grep -qE "$shipped"; then
             echo "No shipped-surface files changed; version bump not required."
@@ -329,4 +362,60 @@ jobs:
           echo "::error::Shipped files changed but .claude-plugin/plugin.json is still $head_v — bump it (it auto-releases on merge), or add the 'skip-version-check' label if this genuinely ships nothing."
           echo "Changed shipped files:"
           echo "$changed" | grep -E "$shipped" | sed 's/^/  /'
+          exit 1
+
+      # The plugin's Stop hook keeps `.okf/` and the changelog honest for anyone
+      # running the plugin. Contributors who are not running it get nothing, so
+      # the same two obligations are mirrored here. Same PR-only guard and same
+      # `skip-version-check` label as the gate above.
+
+      - name: Require a changelog entry for the new version
+        env:
+          EVENT: ${{ github.event_name }}
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'skip-version-check') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ] || [ "$SKIP" = "true" ]; then
+            echo "Not an enforced pull request; nothing to check."
+            exit 0
+          fi
+          base_v="$(git show "$BASE:.claude-plugin/plugin.json" | jq -r .version)"
+          head_v="$(git show "$HEAD:.claude-plugin/plugin.json" | jq -r .version)"
+          if [ "$base_v" = "$head_v" ]; then
+            echo "Version unchanged ($head_v); no changelog entry required."
+            exit 0
+          fi
+          if grep -qF "## [$head_v]" CHANGELOG.md; then
+            echo "CHANGELOG.md documents $head_v. OK."
+            exit 0
+          fi
+          echo "::error::Version bumped $base_v -> $head_v but CHANGELOG.md has no '## [$head_v]' entry. The release notes are the version's only prose; write them here, not in the commit message."
+          exit 1
+
+      - name: Require an .okf/ update when a skill script changes
+        env:
+          EVENT: ${{ github.event_name }}
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'skip-version-check') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ] || [ "$SKIP" = "true" ]; then
+            echo "Not an enforced pull request; nothing to check."
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          if ! echo "$changed" | grep -qE '^(skills/[^/]+/scripts/|hooks/)'; then
+            echo "No skill script or hook changed; .okf/ update not required."
+            exit 0
+          fi
+          if echo "$changed" | grep -qE '^\.okf/'; then
+            echo "Behaviour changed and .okf/ was updated. OK."
+            exit 0
+          fi
+          echo "::error::A skill script or hook changed but nothing under .okf/ did. Update the concept that describes it and add a log.md entry (this is what the plugin's Stop hook enforces locally), or add the 'skip-version-check' label."
+          echo "Changed behaviour files:"
+          echo "$changed" | grep -E '^(skills/[^/]+/scripts/|hooks/)' | sed 's/^/  /'
           exit 1
