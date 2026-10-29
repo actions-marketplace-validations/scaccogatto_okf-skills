@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml>=6"]
+# dependencies = ["pyyaml>=6,<7"]
 # ///
 """Render an Open Knowledge Format (OKF) bundle as a single self-contained,
 interactive HTML graph (`viz.html`). No backend, no install on the viewing side,
@@ -189,8 +189,8 @@ HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 __OGIMAGE__
-<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js" integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js" integrity="sha384-lqPzN0kmFw9t2syAMwVPM4VbAyqsz/lPyYWbb2Xt6nSPM0WPNrpSWCUBgdcAdgnC" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js" integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu" crossorigin="anonymous"></script>
 <style>
  :root{--bg:#0e0f13;--panel:#16181f;--line:#262a35;--fg:#e6e8ee;--mut:#9aa3b2;--accent:#8ab4ff}
@@ -200,16 +200,20 @@ __OGIMAGE__
     item — a long concept body then stretched #side past the viewport and the page
     grew its own scrollbar on top of the panel's, which in turn forced a spurious
     horizontal one. Pinning the row to 100% keeps the panel scrolling inside. */
- #app{display:grid;grid-template-columns:1fr 400px;grid-template-rows:100%;height:100vh}
- #cy{width:100%;height:100%}
- #side{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:18px}
- header{position:absolute;top:0;left:0;padding:14px 18px;z-index:5;pointer-events:none}
+ #app{display:grid;grid-template-columns:minmax(0,1fr) 6px var(--side-w,400px);grid-template-rows:100%;height:100vh}
+ #stage{position:relative;min-width:0;overflow:hidden}
+ #cy{position:absolute;inset:0}
+ #split{cursor:col-resize;background:var(--line);touch-action:none} #split:hover,#split.drag{background:var(--accent)}
+ #side{background:var(--panel);overflow:auto;padding:18px}
+ #top{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;flex-wrap:wrap;align-items:flex-start;
+   justify-content:space-between;gap:8px 16px;padding:12px 18px;pointer-events:none}
+ header{padding-top:2px;min-width:0}
  h1{font-size:15px;margin:0;font-weight:650} .sub{color:var(--mut);font-size:12px;margin-top:2px}
- #bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;display:flex;gap:8px}
+ #bar{display:flex;flex-wrap:wrap;gap:8px;pointer-events:auto;min-width:0}
  #bar input,#bar select{background:var(--panel);border:1px solid var(--line);color:var(--fg);
    border-radius:8px;padding:8px 10px;outline:none;font-size:13px}
- #search{width:min(300px,32vw)}
- #legend{position:absolute;bottom:14px;left:18px;z-index:5;display:flex;flex-wrap:wrap;gap:6px;max-width:60vw}
+ #search{width:240px;max-width:100%}
+ #legend{position:absolute;bottom:14px;left:18px;right:18px;z-index:5;display:flex;flex-wrap:wrap;gap:6px}
  .chip{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
    border-radius:20px;padding:3px 10px;font-size:12px;color:var(--mut);cursor:pointer;user-select:none}
  .chip.off{opacity:.4} .dot{width:10px;height:10px;border-radius:50%}
@@ -235,8 +239,8 @@ __OGIMAGE__
  .empty{color:var(--mut)} a{color:var(--accent)}
  .src{pointer-events:auto;color:var(--accent);margin-left:10px;text-decoration:none} .src:hover{text-decoration:underline}
 </style></head><body>
-<div id="app"><div id="cy"></div><div id="side"><p class="empty">Click a concept to inspect it.</p></div></div>
-<header><h1>__NAME__</h1><div class="sub">__N__ concepts · __E__ links · OKF v0.2__LINK__</div></header>
+<div id="app"><div id="stage"><div id="cy"></div>
+<div id="top"><header><h1>__NAME__</h1><div class="sub">__N__ concepts · __E__ links · OKF v0.2__LINK__</div></header>
 <div id="bar">
  <input id="search" placeholder="search concepts…">
  <select id="type"><option value="">all types</option></select>
@@ -244,8 +248,9 @@ __OGIMAGE__
   <option value="cose">force</option><option value="concentric">concentric</option>
   <option value="breadthfirst">breadth-first</option><option value="circle">circle</option><option value="grid">grid</option>
  </select>
-</div>
-<div id="legend"></div>
+</div></div>
+<div id="legend"></div></div>
+<div id="split" role="separator" aria-orientation="vertical" title="drag to resize · double-click to reset"></div><div id="side"><p class="empty">Click a concept to inspect it.</p></div></div>
 <script>
 const NODES=__NODES__, EDGES=__EDGES__;
 const PALETTE=["#6E56CF","#D97757","#22C55E","#3B82F6","#EAB308","#EC4899","#14B8A6","#F97316","#A855F7","#0EA5E9","#84CC16","#EF4444","#64748B"];
@@ -269,21 +274,35 @@ const cy=cytoscape({container:document.getElementById('cy'),minZoom:.2,maxZoom:1
  ],
  layout:{name:'__LAYOUT__',animate:false,nodeRepulsion:9000,idealEdgeLength:90,padding:40}});
 const side=document.getElementById('side');
+const app=document.getElementById('app'),split=document.getElementById('split'),SIDE_KEY='okf-viz-side-w';
+let sideW=null,dragFrom=null,relayoutT;
+function setSideW(w){sideW=w==null?null:Math.round(Math.max(240,Math.min(w,innerWidth-240)));
+ if(sideW==null)app.style.removeProperty('--side-w');else app.style.setProperty('--side-w',sideW+'px');cy.resize();}
+function relayout(){clearTimeout(relayoutT);relayoutT=setTimeout(()=>
+ cy.layout({name:curLayout,animate:true,padding:40,nodeRepulsion:9000,idealEdgeLength:90}).run(),150);}
+try{const w=+localStorage.getItem(SIDE_KEY);if(w){setSideW(w);relayout();}}catch(e){}
+split.onpointerdown=e=>{e.preventDefault();split.setPointerCapture(e.pointerId);split.classList.add('drag');dragFrom=sideW;};
+split.onpointermove=e=>{if(split.hasPointerCapture(e.pointerId))setSideW(innerWidth-e.clientX-3);};
+split.onpointerup=split.onpointercancel=()=>{split.classList.remove('drag');
+ if(sideW!==dragFrom)relayout();
+ try{if(sideW!=null)localStorage.setItem(SIDE_KEY,sideW);}catch(e){}};
+split.ondblclick=()=>{setSideW(null);relayout();try{localStorage.removeItem(SIDE_KEY);}catch(e){}};
+addEventListener('resize',()=>{if(sideW!=null)setSideW(sideW);else cy.resize();relayout();});
 const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function relList(title,arr){if(!arr.length)return'';
  return `<div class="rel"><h4>${title}</h4>${arr.map(id=>`<a data-go="${esc(id)}">${esc((byId[id]||{}).title||id)}</a>`).join('')}</div>`;}
 // §5.3 — the trust tier is derived, never stored: no `verified` is unverified,
 // `verified` by non-`human:` actors only is machine-confirmed, and any `human:`
 // actor makes it human-reviewed. The exact lowercase prefix is the whole key.
-// §5.5 — a concept is stale when today >= stale_after; both are YYYY-MM-DD, so
-// a string compare is the whole comparison. Advisory signals, not access control.
-const TODAY=new Date().toISOString().slice(0,10);
+// §5.5 — a concept is stale when now >= stale_after. PyYAML renders an unquoted
+// datetime with a space separator, which Date.parse rejects in some engines.
+// Advisory signals, not access control.
 function trustTier(n){const v=n.verified||[];
  if(!v.length)return['t-unverified','unverified'];
  return v.some(e=>(e.by||'').startsWith('human:'))?['t-human','human-reviewed']
                                                   :['t-machine','machine-confirmed'];}
 function badges(n){const [cls,label]=trustTier(n),out=[`<span class="badge ${cls}">${label}</span>`];
- if(n.stale_after&&TODAY>=n.stale_after)out.push(`<span class="badge b-stale">stale since ${esc(n.stale_after)}</span>`);
+ if(n.stale_after&&Date.parse(n.stale_after.replace(' ','T'))<=Date.now())out.push(`<span class="badge b-stale">stale since ${esc(n.stale_after)}</span>`);
  if(n.status==='deprecated')out.push('<span class="badge b-deprecated">deprecated</span>');
  return `<div class="badges">${out.join('')}</div>`;}
 // OKF v0.2 trust (§5.2) + lifecycle (§5.4/§5.5). A v0.1 `timestamp` arrives here

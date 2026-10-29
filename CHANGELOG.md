@@ -4,6 +4,175 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this plugin tracks the
 OKF spec version it supports.
 
+## [0.12.0] - 2026-10-19
+
+### Added
+- **The enforced-upkeep Stop hook can watch nested git repos.** A bundle that
+  documents separate repos checked out inside the project (say `repos/app-fe/`
+  and `repos/app-be/`, gitignored by the outer repo) never saw their changes, so
+  `upkeep: enforced` stayed quiet on real code edits. Add `recursive: true` (or
+  a depth, `recursive: 3`: how many directory levels below the project root a
+  repo's directory may sit, so `repos/app` is 2; `true` means 6) to
+  the root `index.md` frontmatter and the hook finds nested repos by itself
+  (no list to maintain): uncommitted changes to tracked files in them now
+  count, and the block message names them. Discovery skips worktrees of the
+  outer repo, submodules, linked worktrees of repos inside the project, repos
+  with their own `.okf/` bundle, and heavy directories (`node_modules`, `.venv`,
+  `target`, `dist`, ...), so it stays within the hook timeout. Bundles without
+  the key behave as before, and the validator accepts the key in the root index.
+
+## [0.11.0] - 2026-10-15
+
+### Added
+- **The visualizer's detail panel is resizable.** Drag the bar between the graph
+  and the panel; double-click it to restore the default 400px. The width is
+  remembered per browser (`localStorage`). The graph re-runs the selected layout
+  when a drag ends and when the window resizes, so it fills the new space.
+
+## [0.10.3] - 2026-10-13
+
+### Added
+- **Codex displays the `okf` skill as `OKF`.**
+  `skills/okf/agents/openai.yaml` supplies the OpenAI-specific display name and
+  short description while the portable skill name remains lowercase.
+
+## [0.10.2] - 2026-10-13
+
+### Security
+- **The visualizer loads every CDN script with Subresource Integrity.**
+  `marked` was loaded as `marked@14`, a floating range, and neither it nor
+  Cytoscape carried an `integrity` attribute, so a compromised CDN file or a
+  bad 14.x release would have run in every generated `viz.html` and on the
+  GitHub Pages demos. DOMPurify sanitizes marked's output and cannot guard
+  against marked itself. `marked` is now pinned to 14.1.4, and Cytoscape 3.30.2
+  and marked carry `integrity` and `crossorigin="anonymous"`, like DOMPurify.
+- **Shipped scripts cap their dependencies' major version.** `mcp>=2,<3` and
+  `pyyaml>=6,<7`. `uv run` resolves afresh on every machine with no lockfile, so
+  an `mcp` 3.0 would have broken the MCP server for every install on release day.
+
+### Changed
+- **Release notes come from this changelog.** A release's body is now its
+  `## [<version>]` section here, followed by the generated PR list. It used to
+  be the PR list alone.
+- **`okf_backfill_events.py` catches only the errors it expects** (a missing
+  `git`, a failing git command, an unreadable or non-JSON transcript line). An
+  unexpected error now surfaces with a traceback instead of being skipped
+  silently.
+
+### Added
+- **`CONTRIBUTING.md`** lists the three PR gates (version bump, changelog entry,
+  `.okf/` upkeep) and the local commands that mirror CI. **`SECURITY.md`**
+  describes private vulnerability reporting.
+- **CI lints every Python script with a pinned `ruff`** (`make lint` locally),
+  and tests that CDN scripts carry SRI and that shipped dependencies are capped.
+
+### Fixed
+- **Dependabot updates of the `action.yml` pin no longer stall on the
+  `version-bump` check.** Dependabot cannot bump the plugin version, so such a
+  PR could never pass. A Dependabot PR whose only shipped change is
+  `action.yml` is now exempt, and the pin ships with the next release.
+
+## [0.10.1] - 2026-10-13
+
+### Fixed
+- **`validate` no longer reads regex classes in code as footnotes (#56).**
+  A `[^#?/]` inside a code span or a fenced block warned as a §5.1 footnote
+  naming no source, which made `--strict` unusable on bundles that document
+  regexes. Footnote labels are now collected after code spans and fences are
+  stripped, as CommonMark does.
+- **The Stop hook ignores the Claude Code settings files (#58).** A tracked
+  change to `.claude/settings.json` or `.claude/settings.local.json` alone no
+  longer blocks: `/plugin` writes the first, no concept documents it, and every
+  session in that checkout was blocked until it was committed. Other tracked
+  paths under `.claude/` (commands, hooks, skills) still count.
+
+### Changed
+- **The GitHub Action runs `astral-sh/setup-uv` v10**, pinned by commit SHA
+  (was `@v5`). v10 disables its cache by default on untrusted events, and the
+  action sets no cache inputs, so callers see no change.
+- **Dependabot keeps the workflow and action pins current** (weekly
+  `github-actions` updates).
+
+## [0.10.0] - 2026-09-28
+
+### Changed
+- **`log.md` records lifecycle events only.** The `okf` skill, the log template,
+  `okf_init.py`'s starter concept and the `CLAUDE-okf.md` snippet no longer ask
+  for a log entry on every change. An entry goes in the bundle-root `log.md` when
+  a bundle is created, a concept is deprecated, superseded, or regenerated after
+  its source changed, or a verification pass runs. Routine edits are already
+  recorded by `generated` and git. This matches upstream, whose sample bundle
+  holds four entries in five months, and an open upstream proposal
+  (open-knowledge-format#22) that would make root `log.md` supersession entries
+  normative. Existing entries stay: the log is append-only.
+- **The Stop hook accepts any change under `.okf/` as upkeep, not `log.md`
+  alone.** Untracked files count, so a new concept satisfies it. With every
+  change writing to the top of `log.md`, parallel branches conflicted on every
+  merge (#54). A bundle with `upkeep: enforced` that relied on the hook to force
+  log entries now gets fewer of them, by design.
+- **The backfill weaver logs lifecycle events only.** A reconstructed bundle's
+  `log.md` gets a bullet when a concept is created, deprecated or superseded,
+  dated by the event. A routine update's "why" goes into the concept body, and
+  a reversal into its `## History`. Coverage was already read from `sources`,
+  and every live event must still land in at least one concept's `sources`.
+- **The CI `.okf/` guard's error message** no longer asks for a `log.md` entry.
+
+### Added
+- **Tests for the Stop hook** (`tests/test_okf_stop_hook.py`), run in CI on
+  Linux: each gate against a throwaway git repo, including the new "any change
+  under `.okf/`" rule and the loop guard.
+
+## [0.9.6] - 2026-09-21
+
+### Changed
+- **Spec re-vendored from the new upstream repository.** Upstream moved to
+  `GoogleCloudPlatform/open-knowledge-format` on 2026-08-21; the former
+  `knowledge-catalog/okf` location is a frozen snapshot. `skills/okf/reference/SPEC.md`
+  is re-vendored at commit `0b87c52`, with a header note pointing at the frozen
+  snapshot. The only normative change is that `stale_after`, `sources[].last_modified`
+  and `usage_window.{from,to}` are now ISO 8601 datetimes with an explicit offset;
+  Version 0.2 and section numbering are unchanged.
+- **The validator accepts ISO 8601 datetimes on those three fields.** A bare
+  `YYYY-MM-DD` is still tolerated, so no existing bundle picks up a new warning;
+  `stale_after` is stale when `now >= stale_after`, worded to match the spec.
+- **The visualizer compares staleness as instants, not strings**, so a datetime
+  value in `stale_after` reads stale on the correct day instead of never matching
+  the old `YYYY-MM-DD` comparison.
+- **The backfill weaver's frontmatter contract writes full event timestamps**
+  (`sources[].last_modified`) instead of a truncated `YYYY-MM-DD`, matching what
+  the validator now accepts.
+- **Plugin description now mentions backfill and MCP serving**, alongside author,
+  maintain, validate and visualize.
+
+### Fixed
+- **The weaver's ordering instruction pointed at filename sort, which is hash
+  order.** `agents/bundle-weaver.md` told the weaver to read `analyses/*.md` in
+  "chronological order (the filename sort... is deterministic)" — but analysis
+  filenames are event ids, content hashes, whose lexical order has no relation to
+  time. Reported from a real reconstruction where filename order matched
+  chronological order in 10 of 107 positions. It now names the live-event-id list
+  (which carries event-stream order) or the analysis's frontmatter `timestamp`,
+  and forbids sorting by filename.
+
+## [0.9.5] - 2026-09-21
+
+### Fixed
+- **A backfilled bundle no longer asserts superseded states as current.** Three
+  independent gaps in the skill text, all reported from a real reconstruction: the
+  weaver's frontmatter contract omitted `status`, which SPEC §5.4 reads as `stable`
+  ("ready for consumption") for concepts nobody had reread; "update over create" is a
+  merge rule with nothing to say about a later event overturning an earlier one, so
+  reversals landed as a second present-tense claim beside the first; and every guard
+  was lexical, with the coverage check actively pushing to keep superseded material.
+  The weaver now writes `status: draft` on every concept (`deprecated` once a newer
+  concept supersedes it, keeping its `sources` so coverage stays green), greps the
+  whole bundle before writing, and on contradiction rewrites the body to today's state
+  with the old position as a dated `## History` line, counting `superseded` in its
+  reply. Finalize greps that `status` is present and reports the counts. The
+  semantic check stays at fold time, where the weaver has both the analysis and the
+  earlier concepts; a whole-bundle reread pass would be a second full pass for a case
+  fold time already covers.
+
 ## [0.9.4] - 2026-09-05
 
 ### Added

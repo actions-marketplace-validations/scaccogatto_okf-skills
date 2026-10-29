@@ -18,7 +18,8 @@ decisions on concept naming, grouping, and log entries become the bundle's perma
 ## Input you receive
 
 - A `.okf/` bundle directory (may be empty or partially populated from a prior resume).
-- An `analyses/` directory with one `.md` file per event, timestamped and deterministically ordered.
+- An `analyses/` directory with one `.md` file per event, timestamped in frontmatter. File names
+  are event ids (content hashes) and carry no order.
 - A cursor state file (`.okf/.backfill-state.json`) indicating which events have already been
   folded (resume case).
 - A list of "live" event ids (those without a `skip` field) to process in order.
@@ -30,15 +31,19 @@ decisions on concept naming, grouping, and log entries become the bundle's perma
 
 ### 1. Process events in order
 
-Read analyses in chronological order (the filename sort of `analyses/*.md` is deterministic).
+Read analyses in chronological order: follow the live-event-id list you were given (it carries
+the event-stream order), or sort by each analysis's frontmatter `timestamp`. Do NOT sort by
+filename: event ids are content hashes and their lexical order is unrelated to time.
 For each event:
 
 1. Load the analysis file.
 2. Extract candidate concept names and rationale.
 3. Decide: update existing concepts, or create new ones (prefer update).
 4. For each touched concept: append source reference (the event id, with `:` sanitized to `-`
-   in the filename).
-5. Update `log.md` with a dated bullet explaining the change (the "why" from the analysis).
+   in the filename). Every live event lands in at least one concept's `sources`: that, not
+   `log.md`, is what the coverage check relies on.
+5. If the event created, deprecated or superseded a concept, add a `log.md` bullet under the
+   event's date (§4). A routine update gets no bullet: its "why" goes into the concept body.
 6. Update cursor: save `event_id` and increment `done` count.
 7. Repeat.
 
@@ -53,6 +58,21 @@ For each event:
   higher-level concepts rather than creating one per subsystem.
 - **Update > Create.** The bundle evolves, not explodes. Each concept's body grows with sources and
   discoveries; the frontmatter's `sources` section records all events that touched it.
+- **A reversal is not growth.** Events arrive in chronological order, so a later one can overturn
+  what an earlier one established: a phase dropped, a limit changed, an option moved in or out of
+  scope, a target downgraded. Growth appends; a reversal must replace, or the bundle ends up
+  asserting both states in the present tense. Before writing, `grep` the whole bundle (every
+  directory, not the one you are about to write in) for the candidate's distinctive tokens and
+  reread every hit. Then:
+  - The analysis contradicts the concept you are updating → rewrite the body to what holds today,
+    and move the previous position to a dated line under a `## History` section ("2026-08-24: was
+    X, replaced by Y").
+  - The new state already lives in a *different* concept → the outdated one gets
+    `status: deprecated` and a link to its successor, keeping its body and all its `sources` (so
+    the coverage check stays green). Note both sides in the log bullet.
+  - Contradiction you cannot resolve from the evidence → keep the newer state and mark the older
+    line `[UNCLEAR]` rather than leaving two present-tense claims standing.
+  Count each resolution for `superseded` in your reply.
 
 ### 3. Frontmatter contract for concepts
 
@@ -62,38 +82,49 @@ Each `.okf/*/*.md` file must have YAML frontmatter:
 type: <inferred from analysis; one of: skill, plugin, tool, decision, pattern, architecture>
 title: <Human-readable title>
 description: <One-liner for the concept's essence>
+status: draft            # or `deprecated` once superseded (§2); never `stable`
 tags: [tag1, tag2]
 generated:
-  by: okf-backfill/0.9.4
+  by: okf-backfill/0.9.5
   at: <ISO 8601 timestamp now>
 sources:
   - id: git-abc1234        # Sanitized event id (colons → dashes)
     resource: git:abc1234  # Original id for reverse lookup
-    last_modified: <YYYY-MM-DD of the event's timestamp; the validator warns on anything finer>
+    last_modified: <the event's timestamp, ISO 8601 with offset, as in events.jsonl>
   - id: session-file-42
     resource: session:file:42
-    last_modified: <YYYY-MM-DD of the event's timestamp; the validator warns on anything finer>
+    last_modified: <the event's timestamp, ISO 8601 with offset, as in events.jsonl>
 ```
+
+**`status` is always written, and never `stable`.** SPEC §5.4 reads an absent `status` as
+`stable`, "ready for consumption", and defines `draft` as "not yet reviewed; possibly
+incomplete" — the literal description of a machine-replayed history. Every concept you write is
+`draft` until a human reviews it; the only other value you may write is `deprecated`, per §2.
 
 **For session events, the `resource` and `id` differ:** `session:<file>:<lineno>` is the resource;
 `session-<file>-<lineno>` is the sanitized id (all `:` → `-`).
 
 ### 4. Log entry format
 
-Each concept update gets one bullet under the dated section of `log.md`. Format:
+`log.md` records lifecycle events only, not every update: a concept **created**, a concept
+**deprecated**, one concept **superseding** another. The date heading is the event's date, not
+today's. Format:
 
 ```
 ## 2026-09-01
 
-- **Presales pipeline** (`presales-pipeline.md`): Added vendor-sync phase (from session: "Discuss...").
-  Sources: [`git-abc1234`](/concepts/sales/presales-pipeline.md#sources)
+- **Creation**: [Presales pipeline](/concepts/sales/presales-pipeline.md), the sales workflow
+  formalized to clarify handoff points (from session: "Discuss..."). Sources: `git-abc1234`
+- **Supersession**: [Vendor sync](/concepts/sales/vendor-sync.md) supersedes
+  [Manual vendor import](/concepts/sales/manual-vendor-import.md), now `deprecated`. Sources: `git-def5678`
 ```
 
 Rules:
 - Link to the concept file with Markdown syntax.
 - Explain the "why" from the analysis, not just what changed.
-- Group same-date updates by concept to avoid consecutive duplicate bullets.
 - Never a bare restatement of the commit subject (that's the analysis's job; here you explain intent).
+- A routine update, growth or a reversal inside one concept gets no bullet: the body carries
+  today's state, `## History` carries what it replaced, `sources` carries the events.
 
 ### 5. Anti-degeneration enforcement
 
@@ -131,7 +162,7 @@ If unsure, default to `concepts/`.
 
 When done with all live events (or a batch, if resuming):
 - `.okf/<dir>/<concept>.md` files created/updated with sources and frontmatter.
-- `.okf/log.md` updated with dated bullets.
+- `.okf/log.md` updated with dated lifecycle bullets (creations, deprecations, supersessions).
 - `.okf/.backfill-state.json` cursor updated.
 
 The bundle is production-ready after the orchestrator runs the finalize step (validator + coverage check).
@@ -141,7 +172,7 @@ The bundle is production-ready after the orchestrator runs the finalize step (va
 Your reply to the orchestrator is one line of counts and nothing else:
 
 ```
-folded=<n> created=<n> updated=<n> bullets=<n> conflicts=<n> truncated_inputs=<n> last_id=<event-id>
+folded=<n> created=<n> updated=<n> bullets=<n> conflicts=<n> superseded=<n> truncated_inputs=<n> last_id=<event-id>
 ```
 
 The bundle is on disk; never paste concept bodies, log sections, or analyses into the reply.

@@ -5,7 +5,7 @@ description: Standalone bundle to viz.html renderer (Cytoscape, marked, DOMPurif
 resource: https://github.com/scaccogatto/okf-skills/blob/main/skills/visualize/scripts/okf_visualize.py
 tags: [python, visualization, cytoscape]
 status: stable
-generated: { by: agent:claude-opus-5, at: "2026-09-01T00:00:00Z" }
+generated: { by: "agent:claude-opus-5-5", at: "2026-10-15T00:00:00Z" }
 ---
 
 # Overview
@@ -23,6 +23,24 @@ so legacy bundles still show a date.
 Concept bodies are untrusted content, so markdown output is passed through
 DOMPurify before it reaches `innerHTML`.
 
+The three CDN scripts (Cytoscape, marked, DOMPurify) are each pinned to an exact
+version and carry Subresource Integrity (`integrity` plus
+`crossorigin="anonymous"`). DOMPurify sanitizes what marked returns, so it cannot
+protect against a compromised marked: before 0.10.2 marked was loaded as
+`marked@14`, a floating range, with no SRI. `tests/test_supply_chain.py` fails
+any external script in the generator output or the committed `docs/` demos that
+lacks an exact version or SRI. Bumping a library means recomputing its hash
+(`openssl dgst -sha384 -binary | openssl base64 -A`) and running `make docs`.
+
+# Layout
+
+The page is a three-column grid: graph area, a drag handle, detail panel. The
+title, controls and legend are overlays inside the graph area, so they never
+cover the panel. The panel width is a `--side-w` custom property set by dragging
+the handle (each side keeps at least 240px), reset by double-clicking it, and
+remembered in `localStorage`. After a drag ends or the window resizes, the graph
+re-runs the selected layout; it does not re-run during the drag.
+
 # Derived signals
 
 Two things the panel infers rather than displays, because v0.2 defines them as
@@ -31,8 +49,8 @@ derivations and storing them would be storing an opinion:
 * the **trust tier** (§5.3) — no `verified` is *unverified*, `verified` by
   non-`human:` actors only is *machine-confirmed*, any `human:` actor makes it
   *human-reviewed*;
-* **staleness** (§5.5) — a concept is stale when `today >= stale_after`, which
-  absolute dates reduce to a string comparison.
+* **staleness** (§5.5) — a concept is stale when `now >= stale_after`, compared
+  as instants so a bare date and a full datetime both work.
 
 Both are advisory badges, not access control: nothing is hidden or refused on
 their account.

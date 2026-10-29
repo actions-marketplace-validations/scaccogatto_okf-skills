@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml>=6"]
+# dependencies = ["pyyaml>=6,<7"]
 # ///
 """Unit tests for okf_validate.py internals (issue #1).
 
@@ -15,9 +15,16 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "validate" / "scripts"))
-from okf_validate import (  # noqa: E402
-    Report, check_concept, check_index, check_links, check_log,
-    collect_link_targets, migrate, split_frontmatter, validate,
+from okf_validate import (
+    Report,
+    check_concept,
+    check_index,
+    check_links,
+    check_log,
+    collect_link_targets,
+    migrate,
+    split_frontmatter,
+    validate,
 )
 
 FULL_META = ('---\ntype: Reference\ntitle: t\ndescription: d\ntags: [x]\n'
@@ -52,7 +59,7 @@ class TestSplitFrontmatter(unittest.TestCase):
         self.assertEqual(split_frontmatter("just text"), (None, "just text"))
 
     def test_unterminated_is_absent(self):
-        raw, body = split_frontmatter("---\ntype: A\nno closing fence\n")
+        raw, _ = split_frontmatter("---\ntype: A\nno closing fence\n")
         self.assertIsNone(raw)
 
     def test_first_line_must_be_bare_dashes(self):
@@ -162,6 +169,23 @@ class TestV02Families(TmpBundle):
             self.assertEqual((r.errors, r.warnings), ([], []), ok)
         self.assertIn("§5.5", self.only(self.concept("generated: { by: human:t }\nstale_after: 30d\n")))
 
+    def test_stale_after_accepts_an_iso_datetime(self):
+        r = self.concept("generated: { by: human:t }\nstale_after: 2026-09-21T00:00:00Z\n")
+        self.assertEqual((r.errors, r.warnings), ([], []))
+
+    def test_usage_window_accepts_iso_datetimes(self):
+        r = self.concept(
+            "generated: { by: human:t }\n"
+            "usage_window: { from: 2026-06-01T00:00:00Z, to: 2026-06-30T00:00:00Z }\n"
+            "sources:\n  - { resource: https://x, usage_count: 5 }\n")
+        self.assertEqual((r.errors, r.warnings), ([], []))
+
+    def test_source_last_modified_accepts_an_iso_datetime(self):
+        r = self.concept(
+            "generated: { by: human:t }\n"
+            "sources:\n  - { resource: https://x, last_modified: 2026-09-21T10:00:00+02:00 }\n")
+        self.assertEqual((r.errors, r.warnings), ([], []))
+
     def test_source_needs_a_resource(self):
         r = self.concept("generated: { by: human:t }\nsources:\n  - { id: a, title: A }\n")
         self.assertIn("§5.1", self.only(r))
@@ -173,6 +197,28 @@ class TestV02Families(TmpBundle):
         self.assertEqual((r.errors, r.warnings), ([], []))
         r = self.concept(good, "Claim.[^nope]\n\n[^nope]: Nope\n")
         self.assertIn("[^nope]", self.only(r))
+
+    def test_regex_classes_in_code_are_not_footnotes(self):
+        # #56: a negated character class in a code span or fence is code, not a
+        # footnote reference (CommonMark recognizes neither inside code).
+        good = ("generated: { by: human:t }\nsources:\n"
+                "  - { id: pol, resource: https://x/pol, title: Policy }\n")
+        body = ("- `.../clients/(?<client_code>[^#?/]+).*` matches `clients/folders` too\n"
+                "- ``a `[^a-z]` b`` in a double-backtick span\n\n"
+                "```\nre.compile(r\"[^0-9]+\")\n```\n\n"
+                "~~~python\n[^x]\n~~~\n\n"
+                "Claim.[^pol]\n\n[^pol]: Policy\n")
+        r = self.concept(good, body)
+        self.assertEqual((r.errors, r.warnings), ([], []))
+
+    def test_footnote_outside_code_still_checked_next_to_a_code_span(self):
+        good = ("generated: { by: human:t }\nsources:\n"
+                "  - { id: pol, resource: https://x/pol, title: Policy }\n")
+        r = self.concept(good, "`[^a-z]` then a claim.[^nope]\n\n```\n[^b]\n```\nAfter.[^gone]\n")
+        self.assertEqual(r.errors, [])
+        self.assertEqual(len(r.warnings), 2, r.warnings)
+        self.assertTrue(any("[^nope]" in w for w in r.warnings))
+        self.assertTrue(any("[^gone]" in w for w in r.warnings))
 
     def test_legacy_citations_body_section_warns(self):
         r = self.concept("generated: { by: human:t }\n", "# Citations\n\n[1] [x](https://x)\n")
@@ -266,6 +312,12 @@ class TestCheckIndex(TmpBundle):
         r = self.run_check(check_index, "index.md", True)
         self.assertEqual((r.errors, r.warnings), ([], []))
 
+    def test_root_recursive_is_clean(self):
+        # Read by the Stop hook alongside `upkeep`; same reasoning applies.
+        self.write("index.md", "---\nokf_version: '0.2'\nupkeep: enforced\nrecursive: true\n---\n# Index\n")
+        r = self.run_check(check_index, "index.md", True)
+        self.assertEqual((r.errors, r.warnings), ([], []))
+
     def test_root_extra_keys_warn(self):
         self.write("index.md", "---\nokf_version: '0.2'\ntype: X\n---\n")
         r = self.run_check(check_index, "index.md", True)
@@ -324,9 +376,9 @@ class TestCheckLinks(TmpBundle):
 
     def test_resolution_matrix(self):
         r = self.links(
-            ("a.md", "[ok](sub/b.md) [ok abs](/sub/b.md) [anchor](sub/b.md#x) "
-                     "[ext](https://example.com/x.md) [mail](mailto:x@y.z) "
-                     "[dir](sub/) [asset](img.png) [missing](nope.md)"),
+            ("a.md", ("[ok](sub/b.md) [ok abs](/sub/b.md) [anchor](sub/b.md#x) "
+                      "[ext](https://example.com/x.md) [mail](mailto:x@y.z) "
+                      "[dir](sub/) [asset](img.png) [missing](nope.md)")),
             ("sub/b.md", "[up ok](../a.md) [escape](../../etc/passwd.md)"),
         )
         warned = " ".join(r.warnings)

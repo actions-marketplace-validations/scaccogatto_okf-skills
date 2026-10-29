@@ -5,7 +5,7 @@ description: Zero-config Python conformance checker and v0.1→v0.2 migrator (PE
 resource: https://github.com/scaccogatto/okf-skills/blob/main/skills/validate/scripts/okf_validate.py
 tags: [python, validator, uv]
 status: stable
-generated: { by: agent:claude-opus-5, at: "2026-09-01T00:00:00Z" }
+generated: { by: "agent:claude-opus-5-5", at: "2026-10-19T00:00:00Z" }
 ---
 
 # Overview
@@ -28,16 +28,17 @@ the checker out of conformance. The §11.1 error therefore names the fix: add a
 All soft, all warnings: `generated.by` present when `generated` is; every
 `verified` entry has an actor (a bare mapping counts as a one-element list);
 `status` is one of draft/stable/deprecated; `stale_after` and
-`sources[].last_modified` are absolute `YYYY-MM-DD` dates; `generated.at` and
-`verified[].at` are RFC 3339 (date-only tolerated); every `sources` entry has a
+`sources[].last_modified` are ISO 8601 datetimes (a bare date is tolerated);
+`generated.at` and `verified[].at` are RFC 3339 (date-only tolerated); every `sources` entry has a
 `resource`; a `usage_count` is framed by a `usage_window`; every `[^label]`
-footnote names a `sources[].id`; an `Attested Computation` declares a `runtime`
-and its path-valued `computation` / `executor.resource` / `attester.resource`
+footnote names a `sources[].id` (code spans and fenced blocks are skipped, as
+CommonMark does, so a regex class like `[^a-z]` in code is not a footnote); an
+`Attested Computation` declares a `runtime` and its path-valued `computation` / `executor.resource` / `attester.resource`
 resolve inside the bundle. Legacy `timestamp` and `# Citations` warn with their
 v0.2 replacement, per the [dual-read decision](/decisions/okf-v02-dual-read.md).
-The root `index.md` frontmatter carries only `okf_version` or `upkeep` (the Stop
-hook's opt-in flag rides along, so an enforced-upkeep bundle passes its own
-`--strict` run), and a declared `okf_version` matches the checked version.
+The root `index.md` frontmatter carries only `okf_version`, `upkeep` or `recursive`
+(the Stop hook's opt-in flag and nested-repo switch ride along, so an
+enforced-upkeep bundle passes its own `--strict` run), and a declared `okf_version` matches the checked version.
 
 # The actor check (§7)
 
